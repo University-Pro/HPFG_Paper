@@ -21,7 +21,7 @@ class Building(Dataset):
         [255, 255, 255],
     ])
 
-    def __init__(self, root=r"E:\note\ssl\data\ACDC", split="train", transform=None, index=None):
+    def __init__(self, root=r"./data/ACDC", split="train", transform=None, index=None):
 
         super(Building, self).__init__()
         self.split = split
@@ -92,7 +92,7 @@ class Building(Dataset):
         self.ann_dir = np.array(self.ann_dir)
 
 
-def get_building_loader(root=r'/home/ubuntu/data/Ali_building_2class', 
+def get_building_loader(root=r'./data/ACDC', 
                         batch_size=8, 
                         train_crop_size=(512, 512), 
                         ):

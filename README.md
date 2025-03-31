@@ -91,4 +91,5 @@ Our model is related to [SSL4MIS](https://github.com/HiLab-git/SSL4MIS). Thanks 
 
 
 ## 项目注解
-config文件夹中保存的一些训练的配置文件
+config文件夹中保存的一些训练的配置文件,想要复现整个项目需要运行main.py这个文件。
+

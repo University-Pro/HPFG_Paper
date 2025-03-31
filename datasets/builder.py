@@ -1,10 +1,11 @@
+"""
+用于调用多个Dataloaders的函数
+"""
 from datasets.ACDC import get_acdc_loader, get_ssl_acdc_loader
 from datasets.LIDC import get_lidc_loader, get_ssl_lidc_loader
 from datasets.Synapse import get_synapse_loader, get_ssl_synapse_loader
 from datasets.ISIC import get_isic_loader, get_ssl_isic_loader
 from datasets.Building import get_building_loader
-
-
 
 def build_loader(args):
     if args.datasets == "acdc":

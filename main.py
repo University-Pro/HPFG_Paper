@@ -19,10 +19,11 @@ from datasets import build_loader
 
 
 def main():
-    path=r"config/hpfg_unet_plus_30k_224x224_ACDC.yaml" # 加载配置文件 load profile
+    path=r"./config/hpfg_unet_plus_30k_224x224_ACDC.yaml" # 加载配置文件 load profile
     root = os.path.dirname(os.path.realpath(__file__))  # 获取绝对路径 Obtain absolute path
     args = loadyaml(os.path.join(root, path))  # 加载yaml Load yaml
 
+    # 设置参数
     if args.cuda:
         args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     else:
@@ -45,8 +46,9 @@ def main():
     np.random.seed(args.seed)
 
     torch.backends.cudnn.deterministic = False  # 单卡的不需要分布式
-    torch.backends.cudnn.benchmark = True  # 寻找最佳 的训练路径
-
+    torch.backends.cudnn.benchmark = True  # 寻找最佳 的训练路径，但是会降低一些训练速度
+    
+    # 构建数据集
     label_loader, unlabel_loader, test_loader = build_loader(args)  # 构建数据集
     args.epochs = args.total_itrs // args.step_size  # 设置模型epoch
     args.logger.info("==========> train_loader length:{}".format(len(label_loader.dataset)))
@@ -54,17 +56,20 @@ def main():
     args.logger.info("==========> test_dataloader length:{}".format(len(test_loader.dataset)))
     args.logger.info("==========> epochs length:{}".format(args.epochs))
 
-    # step 1: 构建模型
-    model1 = build_model(args=args.model1).to(device=args.device)  # 创建模型1,一般是unet
-    model2 = build_model(args=args.model2).to(device=args.device)  # 创建模型2,一般是swinunet
+    # 构建模型，网络1和网络2都是UNet，但是作者这里提到的是unet plus，可能是UNet的一种变种
+    model1 = build_model(args=args.model1).to(device=args.device)  
+    model2 = build_model(args=args.model2).to(device=args.device) 
 
-    ema_model = deepcopy(model2)  # 创建ema_model
+    # 创建ema_model，这里需要使用deepcopy，不共享内存，这样对后续的参数更新不会影响
+    # 设置ema_model的参数不需要通过梯度下降更新，因为他的参数是通过滑动平均更新的
+    ema_model = deepcopy(model2)  
     for name, param in ema_model.named_parameters():
         param.requires_grad = False
 
+    # 移动到设备
     ema_model.to(device=args.device)
 
-    # step 2: 训练模型
+    # 训练模型
     HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, args)
 
 
