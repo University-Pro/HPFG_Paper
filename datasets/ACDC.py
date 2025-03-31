@@ -1,3 +1,6 @@
+"""
+ACDC数据集的加载测试
+"""
 import random
 import torch
 import numpy as np
@@ -9,7 +12,6 @@ import matplotlib.pyplot as plt
 import h5py
 from torchvision.utils import make_grid
 from datasets.utils import RandomGenerator,TwoStreamBatchSampler,patients_to_slices
-
 
 class ACDC(Dataset):
 
@@ -80,7 +82,6 @@ class ACDC(Dataset):
             self.sample_list = [self.root + "/data/{}.h5".format(item) for item in self.sample_list]
             
         self.sample_list=np.array(self.sample_list)
-
 
 def get_acdc_loader(root=r'./data/ACDC', batch_size=4, train_crop_size=(224, 224)):
     train_transform = A.Compose([
@@ -175,39 +176,11 @@ def show(im):
     plt.show()
     fig.savefig("result.png")
 
-
 def show_label(mask, path="label.jpg"):
     plt.figure()
     plt.imshow(mask)
     plt.show()
     Image.fromarray(mask).save(path)
-
-# def get_ssl_acdc_loader(root=r'/home/ubuntu/data/ACDC', batch_size=8, unlabel_batch_size=24, train_crop_size=(224, 224), label_num=0.2,seed=1337):
-#     """
-#     :param root: 数据集路径
-#     :param batch_size: 有标注数据批次大小
-#     :param unlabel_batch_size: 无标注数据的batch大小
-#     :param label_num: 有标签的数量
-#     :return:
-#     """
-
-#     def worker_init_fn(worker_id):
-#         random.seed(seed + worker_id)
-    
-#     train_transform=RandomGenerator(train_crop_size)
-#     train_dataset = ACDC(root=root, split="train", transform=train_transform)
-#     total_slices=len(train_dataset)
-#     labeled_slice=patients_to_slices("ACDC",label_num)
-#     labeled_idxs = list(range(0, labeled_slice))
-#     unlabeled_idxs = list(range(labeled_slice, total_slices))
-
-#     batch_sampler = TwoStreamBatchSampler(labeled_idxs, unlabeled_idxs, batch_size+unlabel_batch_size,unlabel_batch_size)
-#     train_loader=DataLoader(train_dataset,batch_sampler=batch_sampler,num_workers=4,pin_memory=True,worker_init_fn=worker_init_fn)
-
-#     test_dataset = ACDC(root=root, split="test")
-#     test_loader = DataLoader(test_dataset, batch_size=1, num_workers=4, shuffle=False)
-#     return train_loader, test_loader
-
 
 if __name__ == '__main__':
     # 测试有监督版本

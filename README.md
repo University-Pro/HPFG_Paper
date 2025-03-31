@@ -88,3 +88,7 @@ Currently, we have implemented 7 popular semi supervised medical image segmentat
 ## ♥️ Acknowledgement
 
 Our model is related to [SSL4MIS](https://github.com/HiLab-git/SSL4MIS). Thanks for their great work!
+
+
+## 项目注解
+config文件夹中保存的一些训练的配置文件
