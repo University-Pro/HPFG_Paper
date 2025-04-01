@@ -96,6 +96,17 @@ def linear_rampup(current, rampup_length):
 
 
 class BoxMaskGenerator(object):
+    """
+    用于生成多样化的矩形掩码的工具类，适用于图像处理和数据增强任务。
+    
+    参数：
+    - prop_range: tuple[float, float]，控制每个掩码区域面积比例的范围。
+    - n_boxes: int，每个样本中生成的矩形区域数量。
+    - random_aspect_ratio: bool，是否随机调整矩形区域的长宽比。
+    - prop_by_area: bool，是否根据总面积来决定单个区域的比例。
+    - within_bounds: bool，是否确保生成的区域在图像边界内。
+    - invert: bool，是否反转掩码（即保留背景或前景）。
+    """
     def __init__(self,
                  prop_range,
                  n_boxes=1,
@@ -122,6 +133,17 @@ class BoxMaskGenerator(object):
         :param mask_shape: Mask shape as a `(height, width)` tuple
         :param rng: [optional] np.random.RandomState instance
         :return: masks: masks as a `(N, 1, H, W)` array
+
+        生成用于创建掩码的参数。
+        
+        参数：
+        - n_masks: int，需要生成的掩码数量（通常对应批量大小）。
+        - mask_shape: tuple[int, int]，掩码的形状（高度，宽度）。
+        - rng: [可选] np.random.RandomState 实例，用于控制随机性。
+        
+        返回：
+        - masks: numpy.ndarray，形状为 (n_masks, 1, H, W) 的掩码数组。
+
         """
         if rng is None:
             rng = np.random
@@ -173,4 +195,14 @@ class BoxMaskGenerator(object):
         return masks
 
     def torch_masks_from_params(self, t_params, mask_shape, torch_device):
+        """
+        将生成的掩码参数转换为PyTorch张量。
+        
+        参数：
+        - params: numpy.ndarray，由generate_params方法生成的掩码数组。
+        - device: str，指定目标设备（如'cuda'或'cpu'）。
+        
+        返回：
+        - torch.Tensor，形状为 (B, 1, H, W) 的掩码张量。
+        """
         return t_params

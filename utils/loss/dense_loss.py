@@ -3,7 +3,10 @@ import torch
 import torch.nn.functional as F
 
 class Dense_Loss(nn.Module):
-
+    """
+    对比学习损失函数Contrastive Loss
+    通过衡量正样本间的相似性和负样本间的差异性，帮助模型学习到更有区分力的数据表示。
+    """
     def __init__(self,
                  batch_size: int = 32,
                  device=torch.device('cuda'),

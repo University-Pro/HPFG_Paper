@@ -85,36 +85,55 @@ def update_ema_variables_backbone(model, ema_model, alpha, global_step):
 
 
 def HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, args):
+    """
+    半监督医学图像分割的主训练函数
+    
+    参数:
+        model1: 第一个分割模型
+        model2: 第二个分割模型
+        ema_model: 指数移动平均模型(用于教师模型)
+        label_loader: 有标签数据加载器
+        unlabel_loader: 无标签数据加载器
+        test_loader: 测试数据加载器
+        args: 配置参数
+    """
+    # 初始化优化器和学习率调度器
     optimizer1 = build_optimizer(args=args.model1, model=model1)
     lr_scheduler1 = build_lr_scheduler(args=args.model1, optimizer=optimizer1)
-
     optimizer2 = build_optimizer(args=args.model2, model=model2)
     lr_scheduler2 = build_lr_scheduler(args=args.model2, optimizer=optimizer2)
 
+    # 计算epoch数
     max_epoch = args.total_itrs // len(unlabel_loader) + 1
     args.logger.info("==============> max_epoch :{}".format(max_epoch))
 
+    # 初始化密集对比损失
     dense_loss = Dense_Loss(args.batch_size + args.unlabel_batch_size, args.device)
 
-    # config network and criterion
+    # 设置其他的损失函数
     criterion = nn.CrossEntropyLoss(ignore_index=255)
     dice_loss = DiceLoss(args.num_classes)
 
+    # 设置为训练模式
     model1.train()
     model2.train()
-    cur_itrs = 0
-    best_dice1 = 0.0
-    best_dice2 = 0.0
-    best_ema_dice = 0.0
 
+    # 初始化变量
+    cur_itrs = 0  # 当前迭代次数
+    best_dice1 = 0.0  # 模型1的最佳Dice分数
+    best_dice2 = 0.0  # 模型2的最佳Dice分数
+    best_ema_dice = 0.0  # EMA模型的最佳Dice分数
+
+    # CutMix配置
     class config:
-        cutmix_mask_prop_range = (0.25, 0.5)
-        cutmix_boxmask_n_boxes = 4
-        cutmix_boxmask_fixed_aspect_ratio = False
-        cutmix_boxmask_by_size = False
-        cutmix_boxmask_outside_bounds = False
-        cutmix_boxmask_no_invert = False
+        cutmix_mask_prop_range = (0.25, 0.5)  # CutMix掩码比例范围
+        cutmix_boxmask_n_boxes = 4  # 生成掩码的框数量
+        cutmix_boxmask_fixed_aspect_ratio = False  # 是否固定宽高比
+        cutmix_boxmask_by_size = False  # 是否按大小比例生成
+        cutmix_boxmask_outside_bounds = False  # 是否允许超出边界
+        cutmix_boxmask_no_invert = False  # 是否反转掩码
 
+    # 初始化掩码生成器
     mask_generator = BoxMaskGenerator(prop_range=config.cutmix_mask_prop_range,
                                       n_boxes=config.cutmix_boxmask_n_boxes,
                                       random_aspect_ratio=not config.cutmix_boxmask_fixed_aspect_ratio,
@@ -124,32 +143,43 @@ def HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, a
 
     pbar = tqdm(total=args.total_itrs)
 
+    # 初始化有标签数据的迭代器
     label_iter1 = iter(label_loader)
     label_iter = iter(label_loader)
 
+    # 训练循环
     for epoch in range(max_epoch):
-
         run_loss = 0.0
+
+        # 遍历无标签数据
         for idx, (img_unlabel, _) in enumerate(unlabel_loader):
             cur_itrs += 1
+
             try:
+                # 尝试获取有标签数据
                 label_img, target_label = next(label_iter)
                 label_img1, target_label1 = next(label_iter1)
             except StopIteration:
+                # 如果迭代器耗尽，重新初始化
                 label_iter = iter(label_loader)
                 label_img, target_label = next(label_iter)
-
                 label_iter1 = iter(label_loader)
                 label_img1, target_label1 = next(label_iter1)
 
-            label_bs = label_img.shape[0]
-            unlabel_bs = img_unlabel.shape[0]
-
+            # 获取批量大小
+            label_bs = label_img.shape[0]  # 有标签批量大小
+            unlabel_bs = img_unlabel.shape[0]  # 无标签批量大小
+            
+            # 将数据移动到指定设备
             label_img = label_img.to(args.device).float()
             img_unlabel = img_unlabel.to(args.device).float()
+            
+            # 重复有标签数据以匹配无标签批量大小
             label_img1 = label_img1.repeat(int(unlabel_bs // label_bs), 1, 1, 1).to(args.device).float()
             target_label1 = target_label1.repeat(int(unlabel_bs // label_bs), 1, 1).to(args.device).long()
             target_label = target_label.to(args.device).long()
+
+
             cutmix_mask = mask_generator.generate_params(n_masks=unlabel_bs,
                                                          mask_shape=(args.train_crop_size[0], args.train_crop_size[1]))
             cutmix_mask = torch.tensor(cutmix_mask, dtype=torch.float).to(args.device)
