@@ -121,6 +121,8 @@ class projection_conv(nn.Module):
     """
     A non-linear neck in DenseCL
     The non-linear neck, fc-relu-fc, conv-relu-conv
+    这就是论文中的后面一个图的代码
+    既有全局性信息，又有局部的信息
     """
     def __init__(self, in_dim, hid_dim=2048, out_dim=128, s=4):
         super(projection_conv, self).__init__()
@@ -138,6 +140,7 @@ class projection_conv(nn.Module):
             self.pool = None
 
     def forward(self, x):
+
         # Global feature vector
         x1 = self.avgpool(x)
         x1 = x1.reshape(x1.size(0), -1)
@@ -176,6 +179,9 @@ class UNet(nn.Module):
     
 
 class UNet_Plus(nn.Module):
+    """
+    作者使用的网络函数
+    """
     def __init__(self, in_channels=1, num_classes=4):
         super(UNet_Plus, self).__init__()
         #  定义参数
@@ -207,7 +213,7 @@ class UNet_Plus(nn.Module):
 
 if __name__ == '__main__':
     from thop import profile
-    model = UNet(in_channels=3,num_classes=2)
+    model = UNet_Plus(in_channels=3,num_classes=2)
     input = torch.randn(1, 3, 224, 224)
     flops, params = profile(model, inputs=(input,))
     print("flops:{:.3f}G".format(flops /1e9))

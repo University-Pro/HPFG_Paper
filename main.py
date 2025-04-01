@@ -69,7 +69,7 @@ def main():
     # 移动到设备
     ema_model.to(device=args.device)
 
-    # 训练模型
+    # 训练模型，这里model1和model2都是UNet，ema_model是权重参数无法通过梯度更新的model2，只能通过EMA的方式更新梯度
     HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, args)
 
 
@@ -179,48 +179,54 @@ def HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, a
             target_label1 = target_label1.repeat(int(unlabel_bs // label_bs), 1, 1).to(args.device).long()
             target_label = target_label.to(args.device).long()
 
-
+            # 生成CutMix掩码
             cutmix_mask = mask_generator.generate_params(n_masks=unlabel_bs,
                                                          mask_shape=(args.train_crop_size[0], args.train_crop_size[1]))
             cutmix_mask = torch.tensor(cutmix_mask, dtype=torch.float).to(args.device)
 
+            # 通过CutMix混合有标签数据和无标签数据
             batch_un_mix = label_img1 * (1.0 - cutmix_mask) + img_unlabel * cutmix_mask
             batch_mix = torch.cat([label_img, batch_un_mix], dim=0).to(args.device).float()
 
+            # 模型1向前传播，这里的模型1应该是辅助网络
             outputs1, _, _ = model1(batch_mix)
-            outputs_soft1 = torch.softmax(outputs1, dim=1)
+            outputs_soft1 = torch.softmax(outputs1, dim=1) # 获取Softmax概率
 
+            # 模型2向前传播
             volume_batch = torch.cat([label_img, img_unlabel], dim=0).to(args.device).float()
-            outputs2, h1, h2 = model2(volume_batch)
-            outputs_soft2 = torch.softmax(outputs2, dim=1)
+            outputs2, h1, h2 = model2(volume_batch) # 可以看一下model代码，检查一下为什么能输出这么多
+            outputs_soft2 = torch.softmax(outputs2, dim=1) # 获取Softmax概率
 
+            # EMA模型前向传播(不计算梯度)
             with torch.no_grad():
                 ema_output, ema_h1, ema_h2 = ema_model(volume_batch)
                 ema_output_soft = torch.softmax(ema_output.detach(), dim=1)
 
-            # supervised loss 两个监督loss
-            loss1 = 0.5 * (criterion(outputs1[:label_bs], target_label) + dice_loss(outputs_soft1[:label_bs],
-                                                                                    target_label.unsqueeze(1)))
-
-            loss2 = 0.5 * (criterion(outputs2[:label_bs], target_label) + dice_loss(outputs_soft2[:label_bs],
-                                                                                    target_label.unsqueeze(1)))
-
+            # ========== 计算损失 ==========
+            
+            # 监督损失(两个模型)
+            loss1 = 0.5 * (criterion(outputs1[:label_bs], target_label) + 
+                          dice_loss(outputs_soft1[:label_bs], target_label.unsqueeze(1)))
+            loss2 = 0.5 * (criterion(outputs2[:label_bs], target_label) + 
+                          dice_loss(outputs_soft2[:label_bs], target_label.unsqueeze(1)))
             loss_sup = loss1 + loss2
-
+            # 密集对比损失
             loss_constrivate = dense_loss(h1, ema_h1) + dense_loss(h2, ema_h2)
 
             # 4个半监督损失=两个cps loss+两个mean_teacher loss
-            # cross pseudo losses
+            # 准备CutMix掩码
             cutmix_mask = cutmix_mask.squeeze(1)
+
+            # 后面的一个损失函数
             pseudo_outputs1 = torch.argmax(ema_output_soft[label_bs:], dim=1, keepdim=False)
             pseudo_outputs1 = target_label1 * (1.0 - cutmix_mask) + pseudo_outputs1 * cutmix_mask
-
             pseudo_supervision1 = dice_loss(outputs_soft1[label_bs:], pseudo_outputs1.unsqueeze(1))
 
-            # mean teacher losses
+            # mean teacher一致性损失权重
             consistency_weight_cps = args.consistency * linear_rampup(cur_itrs // 150, args.consistency_rampup)
             consistency_weight_mt = args.consistency * linear_rampup(cur_itrs // 150, args.consistency_rampup)
 
+            # 在前一千个item不应用一致性损失
             if cur_itrs < 1000:
                 consistency_loss1 = 0.0
                 consistency_loss2 = 0.0
@@ -228,26 +234,37 @@ def HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, a
                 # consistency_loss1 = torch.mean((outputs_soft1[label_bs:] - ema_output_soft[label_bs:]) ** 2)
                 consistency_loss2 = torch.mean((outputs_soft2[label_bs:] - ema_output_soft[label_bs:]) ** 2)
 
+            # 计算模型1和模型2的半监督损失
             model1_loss = 7 * consistency_weight_cps * pseudo_supervision1 + consistency_weight_mt * consistency_loss1
             model2_loss = consistency_weight_mt * consistency_loss2 + consistency_weight_mt * loss_constrivate
-
             loss_semi = model1_loss + model2_loss
+
+            # 总损失=监督损失+半监督损失
             loss = loss_sup + loss_semi
             run_loss += loss.item()
 
+            # ========== 反向传播和优化 ==========
+            
+            # 清空梯度
             optimizer1.zero_grad()
             optimizer2.zero_grad()
-
+            
+            # 反向传播
             loss.backward()
+            
+            # 更新参数
             optimizer1.step()
             optimizer2.step()
-
-            # ema方式进行更新
+            
+            # 更新EMA模型参数
             update_ema_variables_backbone(model1, model2, args.ema_decay, cur_itrs)
             update_ema_variables(model2, ema_model, args.ema_decay, cur_itrs)
-
+            
+            # 更新学习率
             lr_scheduler1.step()
             lr_scheduler2.step()
+            
+            # 记录学习率
             lr1 = optimizer1.param_groups[0]["lr"]
             lr2 = optimizer2.param_groups[0]["lr"]
 
@@ -259,14 +276,17 @@ def HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, a
             args.writer.add_scalar('HPFG/consistency_weight_cps', consistency_weight_cps, cur_itrs)
             args.writer.add_scalar('HPFG/consistency_weight_mt', consistency_weight_mt, cur_itrs)
 
+            # ========== 定期评估模型 ==========
+
             if cur_itrs % args.step_size == 0:
+                # 测试模型1
                 mean_dice, mean_hd952 = test_acdc(model=model1, test_loader=test_loader, args=args, cur_itrs=cur_itrs,
                                                   name="model1")
                 args.writer.add_scalar('HPFG/model1_dice', mean_dice, cur_itrs)
                 args.writer.add_scalar('HPFG/model1_hd95', mean_hd952, cur_itrs)
-
                 args.logger.info("model1_dice: {:.4f} model1_hd95: {:.4f}".format(mean_dice, mean_hd952))
 
+                # 保存最佳模型
                 if mean_dice > best_dice1:
                     best_dice1 = mean_dice
                     torch.save({
@@ -278,13 +298,14 @@ def HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, a
                     }, args.model1_save_path)
                 model1.train()
 
-                #  模型2 进行测试
+                # 测试模型2
                 mean_dice, mean_hd952 = test_acdc(model=model2, test_loader=test_loader, args=args, cur_itrs=cur_itrs,
                                                   name="model2")
                 args.writer.add_scalar('S4CVnet/model2_dice', mean_dice, cur_itrs)
                 args.writer.add_scalar('S4CVnet/model2_hd95', mean_hd952, cur_itrs)
                 args.logger.info("model2_dice: {:.4f} model2_hd95: {:.4f}".format(mean_dice, mean_hd952))
 
+                # 保存最佳模型
                 if mean_dice > best_dice2:
                     best_dice2 = mean_dice
                     torch.save({
@@ -294,14 +315,18 @@ def HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, a
                         "cur_itrs": cur_itrs,
                         "best_dice": best_dice2
                     }, args.model2_save_path)
+
+                # 恢复训练模式
                 model2.train()
 
+                # 测试EMA模型
                 mean_dice, mean_hd952 = test_acdc(model=ema_model, test_loader=test_loader, args=args,
                                                   cur_itrs=cur_itrs, name="model1")
                 args.writer.add_scalar('S4CVnet/ema_dice', mean_dice, cur_itrs)
                 args.writer.add_scalar('S4CVnet/ema_hd95', mean_hd952, cur_itrs)
                 args.logger.info("ema_dice: {:.4f} ema_hd95: {:.4f}".format(mean_dice, mean_hd952))
 
+                # 保存最佳的EMA模型
                 if mean_dice > best_ema_dice:
                     best_ema_dice = mean_dice
                     torch.save({
@@ -311,14 +336,17 @@ def HPFG(model1, model2, ema_model, label_loader, unlabel_loader, test_loader, a
                         "cur_itrs": cur_itrs,
                         "best_dice": best_ema_dice
                     }, args.ema_model_save_path)
+
+                # 恢复训练模式
                 ema_model.train()
 
+                # 记录最佳分数
                 args.logger.info("model1 best_dice: {:.4f} model2 best_dice: {:.4f} ema best_dice: {:.4f}".format(
                     best_dice1, best_dice2, best_ema_dice))
 
+            # 检查是否达到最大迭代次数
             if cur_itrs > args.total_itrs:
                 return
-
             pbar.update(1)
 
         args.logger.info(
